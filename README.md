@@ -1,4 +1,4 @@
-# Mnemosyne Form Assistant
+# StS Form Assistant
 
 A web application that uses OpenAI's Realtime API to help users fill out forms and stores the submitted data in Google Sheets.
 
