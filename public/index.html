@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mnemosyne Form Assistant</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        button {
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #3367d6;
+        }
+        .ai-section {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+        }
+        .ai-response {
+            border-left: 4px solid #4285f4;
+            padding-left: 15px;
+            margin-top: 15px;
+            font-style: italic;
+        }
+        .chat-container {
+            margin-top: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            height: 300px;
+            overflow-y: auto;
+            padding: 10px;
+            background-color: white;
+        }
+        .chat-input {
+            display: flex;
+            margin-top: 10px;
+        }
+        .chat-input input {
+            flex-grow: 1;
+            margin-right: 10px;
+        }
+        #loading-indicator {
+            text-align: center;
+            display: none;
+            color: #4285f4;
+            margin: 20px 0;
+        }
+        .success-message {
+            color: green;
+            text-align: center;
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #e6f7e6;
+            border-radius: 4px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Mnemosyne Form Assistant</h1>
+        
+        <div id="form-container">
+            <form id="data-form">
+                <div class="form-group">
+                    <label for="name">Full Name</label>
+                    <input type="text" id="name" name="name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" name="email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="phone">Phone Number</label>
+                    <input type="tel" id="phone" name="phone">
+                </div>
+                
+                <div class="form-group">
+                    <label for="address">Address</label>
+                    <textarea id="address" name="address"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="notes">Additional Information</label>
+                    <textarea id="notes" name="notes"></textarea>
+                </div>
+            </form>
+            
+            <div class="ai-section">
+                <h2>AI Form Assistant</h2>
+                <p>Chat with our AI assistant to help fill your form:</p>
+                
+                <div class="chat-container" id="chat-container"></div>
+                
+                <div class="chat-input">
+                    <input type="text" id="user-input" placeholder="Type your message here...">
+                    <button id="send-button">Send</button>
+                </div>
+            </div>
+            
+            <div id="loading-indicator">
+                <p>Processing your information...</p>
+            </div>
+            
+            <div class="success-message" id="success-message">
+                Your form has been successfully submitted and stored in Google Sheets!
+            </div>
+            
+            <button type="button" id="submit-button" style="margin-top: 20px; width: 100%;">Submit Form</button>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            let clientSecret = null;
+            let session = null;
+            const chatContainer = document.getElementById('chat-container');
+            const userInput = document.getElementById('user-input');
+            const sendButton = document.getElementById('send-button');
+            const submitButton = document.getElementById('submit-button');
+            const form = document.getElementById('data-form');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const successMessage = document.getElementById('success-message');
+            
+            // Initialize OpenAI client
+            async function initializeOpenAI() {
+                try {
+                    // Fetch token from our backend
+                    const response = await fetch('/api/get-token');
+                    const data = await response.json();
+                    clientSecret = data.clientSecret;
+                    
+                    if (!clientSecret) {
+                        throw new Error('Failed to get OpenAI token');
+                    }
+                    
+                    // Add welcome message
+                    addMessageToChat('AI Assistant', 'Hello! I can help you fill out this form. What information would you like to provide?', 'ai');
+                    
+                    // Initialize OpenAI session
+                    await initRealtimeSession();
+                } catch (error) {
+                    console.error('Error initializing OpenAI:', error);
+                    addMessageToChat('System', 'Error connecting to AI assistant. Please try again later.', 'system');
+                }
+            }
+            
+            async function initRealtimeSession() {
+                try {
+                    session = await window.openai.createRealtimeSession({
+                        clientSecret: clientSecret,
+                        onTextContent: (content) => {
+                            // Handle streamed text from OpenAI
+                            onAIResponse(content);
+                        },
+                    });
+                    
+                    console.log('Realtime session initialized');
+                } catch (error) {
+                    console.error('Error initializing realtime session:', error);
+                }
+            }
+            
+            // Add message to chat UI
+            function addMessageToChat(sender, message, type) {
+                const messageElement = document.createElement('div');
+                messageElement.style.marginBottom = '10px';
+                messageElement.style.padding = '8px';
+                messageElement.style.borderRadius = '4px';
+                
+                if (type === 'user') {
+                    messageElement.style.backgroundColor = '#e6f2ff';
+                    messageElement.style.textAlign = 'right';
+                } else if (type === 'ai') {
+                    messageElement.style.backgroundColor = '#f0f0f0';
+                }
+                
+                messageElement.innerHTML = `<strong>${sender}:</strong> ${message}`;
+                chatContainer.appendChild(messageElement);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+            
+            // Send message to OpenAI
+            async function sendMessageToAI(message) {
+                try {
+                    if (!session) {
+                        await initRealtimeSession();
+                    }
+                    
+                    const formData = getFormData();
+                    
+                    await session.sendTextContent({
+                        content: message,
+                        referencedContent: [
+                            {
+                                type: "form_data",
+                                title: "Form Information",
+                                text: JSON.stringify(formData)
+                            }
+                        ]
+                    });
+                } catch (error) {
+                    console.error('Error sending message to AI:', error);
+                    addMessageToChat('System', 'Error communicating with the AI assistant.', 'system');
+                }
+            }
+            
+            // Handle AI response
+            function onAIResponse(content) {
+                addMessageToChat('AI Assistant', content, 'ai');
+                
+                // Try to extract form field data from AI response and fill the form
+                tryToFillFormFields(content);
+            }
+            
+            // Try to extract and fill form fields from AI response
+            function tryToFillFormFields(content) {
+                // Simple extraction for demonstration
+                const formFields = {
+                    name: document.getElementById('name'),
+                    email: document.getElementById('email'),
+                    phone: document.getElementById('phone'),
+                    address: document.getElementById('address'),
+                    notes: document.getElementById('notes')
+                };
+                
+                for (const [field, element] of Object.entries(formFields)) {
+                    if (!element.value) {
+                        // Simple regex patterns for each field type
+                        let pattern;
+                        let match;
+                        
+                        if (field === 'name') {
+                            pattern = new RegExp(`(?:name|full name)[:\\s]+([\\w\\s]+)`, 'i');
+                        } else if (field === 'email') {
+                            pattern = new RegExp(`(?:email|email address)[:\\s]+([\\w.@]+)`, 'i');
+                        } else if (field === 'phone') {
+                            pattern = new RegExp(`(?:phone|phone number|telephone)[:\\s]+(\\d[\\d\\s-+()]{5,20})`, 'i');
+                        } else if (field === 'address') {
+                            pattern = new RegExp(`(?:address|location)[:\\s]+([\\w\\s,.\\d]+)`, 'i');
+                        } else if (field === 'notes') {
+                            pattern = new RegExp(`(?:notes|additional|information)[:\\s]+([\\w\\s,.\\d]+)`, 'i');
+                        }
+                        
+                        if (pattern) {
+                            match = content.match(pattern);
+                            if (match && match[1]) {
+                                element.value = match[1].trim();
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Get form data as object
+            function getFormData() {
+                const formData = {};
+                new FormData(form).forEach((value, key) => {
+                    formData[key] = value;
+                });
+                return formData;
+            }
+            
+            // Submit form data to backend
+            async function submitForm() {
+                loadingIndicator.style.display = 'block';
+                
+                const formData = getFormData();
+                
+                try {
+                    const response = await fetch('/api/submit-form', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(formData)
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        loadingIndicator.style.display = 'none';
+                        successMessage.style.display = 'block';
+                        setTimeout(() => {
+                            // Reset form
+                            form.reset();
+                            successMessage.style.display = 'none';
+                        }, 5000);
+                    } else {
+                        throw new Error(data.error || 'Failed to submit form');
+                    }
+                } catch (error) {
+                    console.error('Error submitting form:', error);
+                    loadingIndicator.style.display = 'none';
+                    alert('Error submitting form: ' + error.message);
+                }
+            }
+            
+            // Event listeners
+            sendButton.addEventListener('click', () => {
+                const message = userInput.value.trim();
+                if (message) {
+                    addMessageToChat('You', message, 'user');
+                    sendMessageToAI(message);
+                    userInput.value = '';
+                }
+            });
+            
+            userInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    sendButton.click();
+                }
+            });
+            
+            submitButton.addEventListener('click', submitForm);
+            
+            // Load OpenAI SDK and initialize
+            const script = document.createElement('script');
+            script.src = 'https://cdn.openai.com/openai.js';
+            script.onload = initializeOpenAI;
+            document.head.appendChild(script);
+        });
+    </script>
+</body>
+</html> 
